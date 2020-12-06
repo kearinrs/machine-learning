@@ -1,0 +1,149 @@
+---
+title: "course project"
+author: "Roisin Kearins"
+date: "5 December 2020"
+output: html_document
+---
+Introduction and Instructions
+
+'Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible
+to collect a large amount of data about personal activity relatively inexpensively. 
+These type of devices are part of the quantified self movement ??? a group of enthusiasts 
+who take measurements about themselves regularly to improve their health, to find patterns 
+in their behavior, or because they are tech geeks. One thing that people regularly do is quantify 
+how much of a particular activity they do, but they rarely quantify how well they do it. In this project, 
+your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. 
+They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is 
+available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).'
+
+All libraries needed are first installed
+libraries
+```{r,echo=FALSE}
+
+library(lattice)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(gbm)
+library(rpart.plot)
+library(mlbench)
+library(parallel)
+library(doParallel)
+library(randomForest)
+```
+The training and test data set need to be initialised
+The data is downloaded / loaded into R from the following links: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data is loaded
+```{r}
+test_data <- read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv')
+
+training_data <- read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv')
+```
+The data is then cleaned
+First any columns with NA in are removed otherise the prediction will be inaccurate
+```{r}
+indColToRemove <- which(colSums(is.na(training_data) |training_data=="")>0.9*dim(training_data)[1]) 
+TrainDataClean <- training_data[,-indColToRemove]
+```
+Any columns with un-needed data are then removed so that both the number of rows and columns are output. 
+
+```{r}
+TrainDataClean <- TrainDataClean[,-c(1:7)]
+dim(TrainDataClean)
+
+
+indColToRemove <- which(colSums(is.na(test_data) |test_data=="")>0.9*dim(test_data)[1]) 
+TestDataClean <- test_data[,-indColToRemove]
+TestDataClean <- TestDataClean[,-c(1:7)]
+
+dim(TestDataClean)
+
+```
+There are 53 columns in both datasets now and just the number of rows is different
+
+
+Divide the training dataset into training and validation(partition the data)
+```{r}
+inTrainIndex = createDataPartition(TrainDataClean$classe, p = 0.75, list=FALSE)
+training_training_data <- TrainDataClean[inTrainIndex,]
+training_crossval_data <-TrainDataClean[-inTrainIndex,]
+
+dim(training_training_data)
+dim(training_crossval_data)
+
+```
+The test dataset is then also altered in a similar way
+
+```{r}
+
+allNames <- names(TrainDataClean)
+clean_test_data <- test_data[,allNames[1:52]]
+```
+Decision Tree
+
+They are the building blocks of random forest models and allow for predictions on future data.
+```{r}
+set.seed(678)
+decisionTreeMod <- train(classe ~., method='rpart', na.action = na.omit, data=training_training_data)
+decisionTreePrediction <- predict(decisionTreeMod, training_crossval_data)
+confusionMatrix(training_crossval_data$classe, decisionTreePrediction)
+
+```
+Plot the tree
+
+```{r}
+rpart.plot(decisionTreeMod$finalModel)
+```
+Above shows a prediction of how the exercise groups are fulfilled
+Random Forest
+In the most simplistic format these models are that they are a just Decision Trees in an exponetial amount all based on different parameters of different data sets. It is commonly used for regression and classification tasks and is more commonly used because it is simple to use. It is random because of when the models are initially generated the data in the columns in randomly selected along with the data in the rows. 
+
+parallel processing to speed up the Random Forest model
+```{r}
+intervalStart <- Sys.time()
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+configure the control
+```{r}
+controlRf <- trainControl(method = "cv",5)
+
+```
+Parallel Ramdom Forest
+```{r, cache=TRUE}
+start.time <- proc.time()
+rfMod <- train(classe ~.,method='rf', data=training_training_data,trControl=controlRf, ntree=250)
+stop.time <- proc.time() 
+run.time<-stop.time -start.time 
+print(run.time) 
+```
+The Random forest model can be used to provide a prediction and allow for the accuracy to be visualised
+```{r}
+rfPrediction <- predict(rfMod, training_crossval_data)
+confusionMatrix(training_crossval_data$classe, rfPrediction)
+```
+Prediction
+
+```{r}
+predict(rfMod, clean_test_data)
+```
+Other models- There were other models that could have been used but unfortunately when they were both run in R and in knitted they took closer to an hour to finish.
+```{r}
+#set.seed(100)
+# model 1: gbm- gradient boosting method
+#modFit1<-train(classe~.,method="gbm",data=TrainDataClean, verbose = FALSE, na.action = na.omit )
+#print(modFit1)
+#plot(modFit1)
+#prediction <- predict(modFit1, newdata= clean_test_data)
+#confusionmat <- confusionMatrix(clean_test_data$classe,prediction)
+```
+
+
+
+Conclusion
+
+By looking at multiple models such as Random Forest and GBM, the best model with the highest sample accuracy is the random forest model at 99.4  %. The decision tree only gives approximately a 50% sample accuracy and the other models give a sample accuracy that was smaller than the Random Forest. This would mean that the Random Forest would be the most appropriate model to choose if the highest accuracy is required
+
